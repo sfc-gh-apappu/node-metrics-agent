@@ -38,6 +38,8 @@ std::string FormatPrometheus(const CpuMetrics& cpu_metrics,
   out << "# TYPE node_memory_total_bytes gauge\n";
   out << "# HELP node_memory_available_bytes System memory available in bytes.\n";
   out << "# TYPE node_memory_available_bytes gauge\n";
+  out << "# HELP node_health_score Overall node health score (0-10).\n";
+  out << "# TYPE node_health_score gauge\n";
   out << "# HELP cpu_process_cpu_seconds_total Process CPU time in seconds.\n";
   out << "# TYPE cpu_process_cpu_seconds_total counter\n";
   out << "# HELP cpu_process_rss_bytes Process resident memory in bytes.\n";
@@ -59,6 +61,7 @@ std::string FormatPrometheus(const CpuMetrics& cpu_metrics,
   out << "node_memory_total_bytes " << cpu_metrics.mem_total_bytes << "\n";
   out << "node_memory_available_bytes " << cpu_metrics.mem_available_bytes
       << "\n";
+  out << "node_health_score " << ComputeNodeHealthScore(cpu_metrics) << "\n";
 
   for (const auto& proc : cpu_processes.processes) {
     out << "cpu_process_cpu_seconds_total{pid=\"" << proc.pid << "\",name=\""

@@ -23,3 +23,14 @@ struct CpuTopProcesses {
 
 CpuMetrics CollectCpuMetrics();
 CpuTopProcesses CollectTopCpuProcesses(size_t max_processes);
+
+// Convenience accessors for individual metrics.
+double GetCpuLoad1m();
+unsigned long long GetNodeMemoryTotalBytes();
+unsigned long long GetNodeMemoryAvailableBytes();
+CpuTopProcesses GetCpuProcessCpuSecondsTotal(size_t max_processes);
+CpuTopProcesses GetCpuProcessRssBytes(size_t max_processes);
+
+// Returns overall node health score in range [0, 10].
+double GetNodeHealthScore();
+double ComputeNodeHealthScore(const CpuMetrics& metrics);

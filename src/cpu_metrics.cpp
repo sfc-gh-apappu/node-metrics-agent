@@ -21,6 +21,31 @@
 
 #include "util.hpp"
 
+namespace {
+
+double Clamp(double value, double min_value, double max_value) {
+  return std::min(std::max(value, min_value), max_value);
+}
+
+double GetCpuCoreCount() {
+#ifdef __linux__
+  long cores = sysconf(_SC_NPROCESSORS_ONLN);
+  return cores > 0 ? static_cast<double>(cores) : 1.0;
+#elif defined(__APPLE__)
+  uint32_t cores = 0;
+  size_t size = sizeof(cores);
+  if (sysctlbyname("hw.logicalcpu", &cores, &size, nullptr, 0) == 0 &&
+      cores > 0) {
+    return static_cast<double>(cores);
+  }
+  return 1.0;
+#else
+  return 1.0;
+#endif
+}
+
+}  // namespace
+
 CpuMetrics CollectCpuMetrics() {
   CpuMetrics metrics;
 
@@ -248,4 +273,44 @@ CpuTopProcesses CollectTopCpuProcesses(size_t max_processes) {
   std::cerr << "Top process metrics unavailable on this platform" << std::endl;
   return result;
 #endif
+}
+
+double GetCpuLoad1m() {
+  return CollectCpuMetrics().load_1m;
+}
+
+unsigned long long GetNodeMemoryTotalBytes() {
+  return CollectCpuMetrics().mem_total_bytes;
+}
+
+unsigned long long GetNodeMemoryAvailableBytes() {
+  return CollectCpuMetrics().mem_available_bytes;
+}
+
+CpuTopProcesses GetCpuProcessCpuSecondsTotal(size_t max_processes) {
+  return CollectTopCpuProcesses(max_processes);
+}
+
+CpuTopProcesses GetCpuProcessRssBytes(size_t max_processes) {
+  return CollectTopCpuProcesses(max_processes);
+}
+
+double ComputeNodeHealthScore(const CpuMetrics& metrics) {
+  const double cores = GetCpuCoreCount();
+
+  const double cpu_score = Clamp(1.0 - (metrics.load_1m / cores), 0.0, 1.0);
+
+  double mem_score = 0.0;
+  if (metrics.mem_total_bytes > 0) {
+    mem_score = static_cast<double>(metrics.mem_available_bytes) /
+                static_cast<double>(metrics.mem_total_bytes);
+  }
+  mem_score = Clamp(mem_score, 0.0, 1.0);
+
+  const double weighted = 0.6 * cpu_score + 0.4 * mem_score;
+  return Clamp(weighted, 0.0, 1.0) * 10.0;
+}
+
+double GetNodeHealthScore() {
+  return ComputeNodeHealthScore(CollectCpuMetrics());
 }

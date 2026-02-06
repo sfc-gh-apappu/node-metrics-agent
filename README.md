@@ -9,8 +9,10 @@ but can run in CPU-only mode for local development.
   - `cpu_load_1m`
   - `node_memory_total_bytes`
   - `node_memory_available_bytes`
+  - `node_health_score`
   - `cpu_process_cpu_seconds_total{pid,name}`
   - `cpu_process_rss_bytes{pid,name}`
+  - Node health score (0-10) derived from CPU + memory headroom
 - GPU metrics (NVML, Linux + NVIDIA drivers):
   - `gpu_utilization_percent`
   - `gpu_memory_used_bytes`, `gpu_memory_total_bytes`
@@ -88,6 +90,7 @@ brew services stop prometheus
 
 Example queries:
 - `cpu_load_1m`
+- `node_health_score`
 - `node_memory_available_bytes / node_memory_total_bytes`
 - `topk(5, cpu_process_rss_bytes)`
 - `topk(5, cpu_process_cpu_seconds_total)`
@@ -97,3 +100,14 @@ Example queries:
 ## Notes
 - GPU metrics require NVML and access to `/dev/nvidia*`.
 - Container/pod mapping from `/proc/<pid>/cgroup` is a stub (see TODO).
+
+## Node health score
+`GetNodeHealthScore()` (exposed as `node_health_score`) returns a 0-10 score
+based on available headroom:
+- CPU score: `1 - (cpu_load_1m / cores)`, clamped to [0, 1].
+- Memory score: `node_memory_available_bytes / node_memory_total_bytes`,
+  clamped to [0, 1].
+- Overall: `10 * (0.6 * cpu_score + 0.4 * mem_score)`.
+
+Intuition: higher load or lower available memory reduces the score, and the
+weights favor CPU responsiveness while still penalizing low memory headroom.
