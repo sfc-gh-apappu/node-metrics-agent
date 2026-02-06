@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-metrics-agent
+  labels:
+    app: node-metrics-agent
+spec:
+  selector:
+    matchLabels:
+      app: node-metrics-agent
+  template:
+    metadata:
+      labels:
+        app: node-metrics-agent
+    spec:
+      containers:
+        - name: node-metrics-agent
+          image: node-metrics-agent:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9100
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: dev
+              mountPath: /dev
+              readOnly: true
+            - name: proc
+              mountPath: /proc
+              readOnly: true
+      volumes:
+        - name: dev
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: proc
+          hostPath:
+            path: /proc
+            type: Directory
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
