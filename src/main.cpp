@@ -6,9 +6,12 @@
 #include <cerrno>
 #include <cstring>
 #include <cstddef>
+#include <chrono>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "cpu_metrics.hpp"
 #include "gpu_metrics.hpp"
@@ -19,6 +22,26 @@ namespace {
 constexpr int kListenPort = 9100;
 constexpr const char* kListenAddr = "0.0.0.0";
 constexpr size_t kTopProcessCount = 100;
+constexpr std::chrono::milliseconds kScrapeInterval{2000};
+
+std::mutex g_metrics_mutex;
+std::string g_metrics_cache;
+
+void RefreshMetricsLoop() {
+  std::string local_cache;
+  local_cache.reserve(64 * 1024);
+  while (true) {
+    CpuMetrics cpu_metrics = CollectCpuMetrics();
+    CpuTopProcesses cpu_processes = CollectTopCpuProcesses(kTopProcessCount);
+    std::vector<GpuMetrics> gpu_metrics = CollectGpuMetrics();
+    FormatPrometheus(cpu_metrics, cpu_processes, gpu_metrics, &local_cache);
+    {
+      std::lock_guard<std::mutex> lock(g_metrics_mutex);
+      g_metrics_cache.swap(local_cache);
+    }
+    std::this_thread::sleep_for(kScrapeInterval);
+  }
+}
 
 std::string BuildHttpResponse(int status_code, const std::string& body) {
   std::ostringstream out;
@@ -83,13 +106,17 @@ void ServeForever() {
 
     std::string request(buffer);
     bool is_metrics = request.rfind("GET /metrics", 0) == 0;
+    bool is_health = request.rfind("GET /healthz", 0) == 0;
+    bool is_ready = request.rfind("GET /readyz", 0) == 0;
     std::string body;
     int status = 200;
     if (is_metrics) {
-      CpuMetrics cpu_metrics = CollectCpuMetrics();
-      CpuTopProcesses cpu_processes = CollectTopCpuProcesses(kTopProcessCount);
-      std::vector<GpuMetrics> gpu_metrics = CollectGpuMetrics();
-      body = FormatPrometheus(cpu_metrics, cpu_processes, gpu_metrics);
+      std::lock_guard<std::mutex> lock(g_metrics_mutex);
+      body = g_metrics_cache;
+    } else if (is_health) {
+      body = "ok\n";
+    } else if (is_ready) {
+      body = "ok\n";
     } else {
       status = 404;
       body = "not found\n";
@@ -105,6 +132,15 @@ void ServeForever() {
 
 int main() {
   InitializeGpuSubsystem();
+  {
+    CpuMetrics cpu_metrics = CollectCpuMetrics();
+    CpuTopProcesses cpu_processes = CollectTopCpuProcesses(kTopProcessCount);
+    std::vector<GpuMetrics> gpu_metrics = CollectGpuMetrics();
+    std::lock_guard<std::mutex> lock(g_metrics_mutex);
+    FormatPrometheus(cpu_metrics, cpu_processes, gpu_metrics, &g_metrics_cache);
+  }
+  std::thread refresher(RefreshMetricsLoop);
+  refresher.detach();
   ServeForever();
   ShutdownGpuSubsystem();
 

@@ -6,6 +6,9 @@
 
 struct CpuMetrics {
   double load_1m = 0.0;
+  double cpu_utilization = 0.0;
+  double cpu_pressure_avg10 = 0.0;
+  double memory_pressure_avg10 = 0.0;
   unsigned long long mem_total_bytes = 0;
   unsigned long long mem_available_bytes = 0;
 };

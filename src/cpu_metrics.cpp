@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -25,6 +26,23 @@ namespace {
 
 double Clamp(double value, double min_value, double max_value) {
   return std::min(std::max(value, min_value), max_value);
+}
+
+double ParsePressureAvg10(const std::string& content) {
+  const std::string needle = "avg10=";
+  size_t pos = content.find(needle);
+  if (pos == std::string::npos) {
+    return 0.0;
+  }
+  pos += needle.size();
+  size_t end = content.find(' ', pos);
+  std::string value =
+      content.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+  try {
+    return std::stod(value);
+  } catch (const std::exception&) {
+    return 0.0;
+  }
 }
 
 double GetCpuCoreCount() {
@@ -55,6 +73,47 @@ CpuMetrics CollectCpuMetrics() {
     std::istringstream stream(loadavg);
     stream >> metrics.load_1m;
   }
+
+  std::string stat = ReadFile("/proc/stat");
+  if (!stat.empty()) {
+    std::istringstream stream(stat);
+    std::string cpu_label;
+    unsigned long long user = 0;
+    unsigned long long nice = 0;
+    unsigned long long system = 0;
+    unsigned long long idle = 0;
+    unsigned long long iowait = 0;
+    unsigned long long irq = 0;
+    unsigned long long softirq = 0;
+    unsigned long long steal = 0;
+    unsigned long long guest = 0;
+    unsigned long long guest_nice = 0;
+    stream >> cpu_label >> user >> nice >> system >> idle >> iowait >> irq >>
+        softirq >> steal >> guest >> guest_nice;
+    if (cpu_label == "cpu") {
+      const unsigned long long idle_all = idle + iowait;
+      const unsigned long long non_idle =
+          user + nice + system + irq + softirq + steal;
+      const unsigned long long total = idle_all + non_idle;
+      static unsigned long long prev_total = 0;
+      static unsigned long long prev_idle = 0;
+      if (prev_total != 0 && total > prev_total && idle_all >= prev_idle) {
+        const unsigned long long total_delta = total - prev_total;
+        const unsigned long long idle_delta = idle_all - prev_idle;
+        if (total_delta > 0) {
+          metrics.cpu_utilization =
+              static_cast<double>(total_delta - idle_delta) /
+              static_cast<double>(total_delta);
+        }
+      }
+      prev_total = total;
+      prev_idle = idle_all;
+    }
+  }
+
+  metrics.cpu_pressure_avg10 = ParsePressureAvg10(ReadFile("/proc/pressure/cpu"));
+  metrics.memory_pressure_avg10 =
+      ParsePressureAvg10(ReadFile("/proc/pressure/memory"));
 
   std::string meminfo = ReadFile("/proc/meminfo");
   if (!meminfo.empty()) {
@@ -296,9 +355,11 @@ CpuTopProcesses GetCpuProcessRssBytes(size_t max_processes) {
 }
 
 double ComputeNodeHealthScore(const CpuMetrics& metrics) {
-  const double cores = GetCpuCoreCount();
+  double cpu_util_score = Clamp(1.0 - metrics.cpu_utilization, 0.0, 1.0);
 
-  const double cpu_score = Clamp(1.0 - (metrics.load_1m / cores), 0.0, 1.0);
+  const double cores = GetCpuCoreCount();
+  const double cpu_load_score =
+      Clamp(1.0 - (metrics.load_1m / cores), 0.0, 1.0);
 
   double mem_score = 0.0;
   if (metrics.mem_total_bytes > 0) {
@@ -307,7 +368,17 @@ double ComputeNodeHealthScore(const CpuMetrics& metrics) {
   }
   mem_score = Clamp(mem_score, 0.0, 1.0);
 
-  const double weighted = 0.6 * cpu_score + 0.4 * mem_score;
+  const double cpu_pressure_penalty =
+      Clamp(metrics.cpu_pressure_avg10 / 100.0, 0.0, 1.0);
+  const double memory_pressure_penalty =
+      Clamp(metrics.memory_pressure_avg10 / 100.0, 0.0, 1.0);
+
+  const double cpu_score =
+      0.6 * cpu_util_score + 0.4 * cpu_load_score;
+  const double weighted =
+      0.5 * cpu_score + 0.3 * mem_score +
+      0.1 * (1.0 - cpu_pressure_penalty) +
+      0.1 * (1.0 - memory_pressure_penalty);
   return Clamp(weighted, 0.0, 1.0) * 10.0;
 }
 

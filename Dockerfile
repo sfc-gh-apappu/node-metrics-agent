@@ -1,16 +1,18 @@
 FROM ubuntu:22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
+ARG USE_NVML=OFF
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
-    libnvidia-ml-dev \
+    && if [ "${USE_NVML}" = "ON" ]; then apt-get install -y --no-install-recommends libnvidia-ml-dev; fi \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 COPY . /src
 
-RUN cmake -S . -B build && cmake --build build --config Release
+RUN cmake -S . -B build -DUSE_NVML=${USE_NVML} \
+    && cmake --build build --config Release
 
 FROM ubuntu:22.04
 
